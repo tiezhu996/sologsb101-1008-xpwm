@@ -15,6 +15,7 @@ import { useValveStore } from '@/stores/valveStore'
 import { useStationStore } from '@/stores/stationStore'
 import { useImbalanceRank } from '@/hooks/useImbalanceRank'
 import { EMPTY_MEASURE_DRAFT, type Measure, type MeasureDraft } from '@/types/measure'
+import { roomTargetCOf } from '@/types/building'
 import type { MeasureRow } from '@/utils/db'
 import { balanceLevel, formatFlow, formatTemp, imbalance } from '@/utils/balance'
 import { parseMeasureBatch } from '@/utils/export'
@@ -67,6 +68,11 @@ const candidates = computed(() => valveStore.filtered)
 
 const activeValve = computed(() => valveStore.valves.find((valve) => valve.id === activeValveId.value) ?? null)
 const activeRow = computed(() => (activeValveId.value ? rank.rowOf(activeValveId.value) : null))
+const activeRoomTarget = computed(() => {
+  if (!activeValve.value) return 20
+  const building = stationStore.buildingById.get(activeValve.value.buildingId) ?? null
+  return roomTargetCOf(building)
+})
 
 const measuresOfActive = computed(() =>
   measureTable.rows.value
@@ -80,7 +86,7 @@ const latestMeasures = computed(() =>
 
 const previewImbalance = computed(() => {
   const design = activeValve.value ? activeValve.value.designFlowM3h : 0
-  const value = imbalance(form.flowM3h, design, form.roomTempC)
+  const value = imbalance(form.flowM3h, design, form.roomTempC, activeRoomTarget.value)
   return { value, level: balanceLevel(value, form.flowM3h, design) }
 })
 
@@ -162,7 +168,8 @@ const batchPreview = computed(() => {
   return parsed.map((row) => {
     const valve = valveStore.valves.find((item) => item.code === row.code) ?? null
     const design = valve ? valve.designFlowM3h : 0
-    const value = valve ? imbalance(row.flowM3h, design, row.roomTempC) : 0
+    const building = valve ? stationStore.buildingById.get(valve.buildingId) ?? null : null
+    const value = valve ? imbalance(row.flowM3h, design, row.roomTempC, roomTargetCOf(building)) : 0
     return { ...row, valve, imbalanceValue: value }
   })
 })
@@ -366,7 +373,10 @@ async function importBatch(): Promise<void> {
           <t-input v-model="form.operator" placeholder="如 王海" />
         </t-form-item>
       </t-form>
-      <t-alert theme="info" :message="`当前输入失衡度约 ${previewImbalance.value.toFixed(1)}% · 判定 ${previewImbalance.level}`" />
+      <t-alert
+        theme="info"
+        :message="`当前输入失衡度约 ${previewImbalance.value.toFixed(1)}% · 判定 ${previewImbalance.level} · 室温基准 ${activeRoomTarget}℃`"
+      />
     </t-dialog>
 
     <t-dialog

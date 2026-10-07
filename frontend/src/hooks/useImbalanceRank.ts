@@ -9,7 +9,7 @@ import { useStationStore } from '@/stores/stationStore'
 import { useValveStore } from '@/stores/valveStore'
 import type { Measure } from '@/types/measure'
 import type { Valve } from '@/types/valve'
-import type { Building } from '@/types/building'
+import { isRoomTargetFallback, roomTargetCOf, type Building } from '@/types/building'
 import type { Station } from '@/types/station'
 import type { MeasureRow } from '@/utils/db'
 import {
@@ -35,6 +35,10 @@ export interface ImbalanceRow {
   /** 流量偏差率（%），正值为偏大 */
   flowDeviation: number
   roomDeviation: number
+  /** 室温基准（℃）：随楼栋供热方式取值，未登记方式按 20℃ */
+  roomTarget: number
+  /** 室温基准是否走了兜底（楼栋缺失或未登记供热方式） */
+  roomTargetFallback: boolean
   imbalanceValue: number
   level: BalanceLevel
   suggestOpening: number
@@ -76,14 +80,15 @@ export function useImbalanceRank(): UseImbalanceRankResult {
     const list = valveStore.valves.map((valve) => {
       const own = (grouped.get(valve.id) ?? []).sort((a, b) => a.date.localeCompare(b.date))
       const latest = own.length > 0 ? own[own.length - 1] : null
-      const measured = latest ? latest.flowM3h : 0
-      const room = latest ? latest.roomTempC : 20
-      const design = valve.designFlowM3h
-      const ratio = flowRatio(measured, design)
-      const value = latest ? imbalance(measured, design, room) : 0
-      const level = latest ? balanceLevel(value, measured, design) : '平衡'
       const building = stationStore.buildings.find((item) => item.id === valve.buildingId) ?? null
       const station = stationStore.stations.find((item) => item.id === valve.stationId) ?? null
+      const roomTarget = roomTargetCOf(building)
+      const measured = latest ? latest.flowM3h : 0
+      const room = latest ? latest.roomTempC : roomTarget
+      const design = valve.designFlowM3h
+      const ratio = flowRatio(measured, design)
+      const value = latest ? imbalance(measured, design, room, roomTarget) : 0
+      const level = latest ? balanceLevel(value, measured, design) : '平衡'
       return {
         valve,
         building,
@@ -93,7 +98,9 @@ export function useImbalanceRank(): UseImbalanceRankResult {
         measured,
         ratio,
         flowDeviation: latest ? flowDeviationPct(measured, design) : 0,
-        roomDeviation: latest ? roomDeviationC(room) : 0,
+        roomDeviation: latest ? roomDeviationC(room, roomTarget) : 0,
+        roomTarget,
+        roomTargetFallback: isRoomTargetFallback(building),
         imbalanceValue: value,
         level,
         suggestOpening: latest ? suggestOpening(valve.currentOpening, ratio, level) : valve.currentOpening

@@ -79,7 +79,7 @@ sologsb101-1008/
 
 - **IndexedDB 库名**：`gbheatgrid`（Dexie 封装，`src/utils/db.ts`）
 - **对象表**：`stations`、`buildings`、`valves`、`measures`、`adjusts`
-- **数据结构版本**：`DB_VERSION = 2`，含 `version(1)` → `version(2)` 的索引变更与 `upgrade()` 迁移（补齐 `revision`、用所属楼栋回填阀门 `stationId` 冗余列、规整开度与复核字段）
+- **数据结构版本**：`DB_VERSION = 3`，含 `version(1)` → `version(2)`（补齐 `revision`、用所属楼栋回填阀门 `stationId` 冗余列、规整开度与复核字段）→ `version(3)`（室温基准口径调整：存量调节单保留原依据并统一补 `needsReview` 待复核标记）的索引变更与 `upgrade()` 迁移
 - **首屏自动播种**：`initDatabase()` 中 `if (await db.stations.count() === 0) await seedDatabase()`，播种 2 座换热站 → 5 栋楼 → 10 只阀门 → 20 条实测 → 4 张调节单的互相引用数据；播种幂等
 - **localStorage 辅助键**：`gbheatgrid:db-version`、`gbheatgrid:last-backup-at`、`gbheatgrid:ui-prefs`（上次选中换热站、仅看失衡开关）
 - 应用为**无状态容器**：数据不落容器磁盘、不使用数据库服务、不挂载命名卷
@@ -97,7 +97,9 @@ npm run preview    # 本地预览构建产物
 ## 七、判定口径
 
 - 流量比 `= 实测流量 ÷ 设计流量`；流量偏差率 `= (流量比 − 1) × 100%`
-- 室温偏差 `= 室温 − 20℃`
+- 室温基准按楼栋供热方式取值：地暖 `20℃`、散热器 `18℃`；楼栋未登记供热方式时按 `20℃` 兜底并在界面提示
+- 室温偏差 `= 室温 − 室温基准`
 - 合成失衡度 `= |流量偏差率| × 0.7 + |室温偏差| × 1.5`（单位 %）
 - 判级：`≤ 10%` 平衡，`10% ~ 25%` 偏大 / 偏小（按流量方向），`> 25%` 严重失衡
 - 目标开度建议 `= 当前开度 ÷ 流量比`，按 5% 取整并限制在 20% ~ 100%
+- 室温基准口径调整前生成的调节单保留原依据文本，统一标「待复核」（`needsReview`），复核闭环后自动清除；调节依据文本中记录所用室温基准，保证口径可追溯

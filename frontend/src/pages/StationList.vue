@@ -362,9 +362,17 @@ function goValves(stationId: string): void {
         >
           <template #areaCell="{ row }">{{ formatArea(row.areaM2) }}</template>
           <template #heatModeCell="{ row }">
-            <t-tag size="small" :theme="row.heatMode === '地暖' ? 'success' : 'warning'" variant="light">
+            <t-tag
+              v-if="row.heatMode === '地暖' || row.heatMode === '散热器'"
+              size="small"
+              :theme="row.heatMode === '地暖' ? 'success' : 'warning'"
+              variant="light"
+            >
               {{ row.heatMode }}
             </t-tag>
+            <t-tooltip v-else content="未登记供热方式，室温基准暂按 20℃ 计算，请尽快补登">
+              <t-tag size="small" theme="danger" variant="light">未登记</t-tag>
+            </t-tooltip>
           </template>
           <template #valveCountCell="{ row }">
             {{ valveStore.valves.filter((valve) => valve.buildingId === row.id).length }}

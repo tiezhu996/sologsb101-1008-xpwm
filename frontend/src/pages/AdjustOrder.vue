@@ -157,6 +157,7 @@ function describeRow(valveId: string): string {
     ratio: row.ratio,
     flowDeviation: row.flowDeviation,
     roomDeviation: row.roomDeviation,
+    roomTarget: row.roomTarget,
     imbalanceValue: row.imbalanceValue,
     level: row.level
   })
@@ -340,6 +341,7 @@ function clearData(): void {
         <h2 class="page-head__title">调节单下发与复核</h2>
         <p class="page-head__desc">
           调节单状态机：待下发 → 已调节（回写阀门开度）→ 已复核（记录复核意见）。
+          标「待复核」的单据生成于室温基准口径调整前，保留原依据，复核闭环后标记自动清除。
         </p>
       </div>
       <div class="page-head__actions">
@@ -355,6 +357,7 @@ function clearData(): void {
       <StatBadge label="已调节" :value="adjustStore.stateCounts['已调节']" suffix="张" tone="info" />
       <StatBadge label="已复核" :value="adjustStore.stateCounts['已复核']" suffix="张" tone="success" />
       <StatBadge label="复核率" :value="adjustStore.reviewedPercent" :percent="adjustStore.reviewedPercent" suffix="%" tone="primary" />
+      <StatBadge label="口径待复核" :value="adjustStore.pendingReviewCount" suffix="张" tone="danger" />
     </div>
 
     <FilterBar
@@ -411,6 +414,12 @@ function clearData(): void {
           >
             {{ row.adjust.state }}
           </t-tag>
+          <t-tooltip
+            v-if="row.adjust.needsReview"
+            content="该单据生成于室温基准口径调整前，保留原依据，请复核确认"
+          >
+            <t-tag size="small" variant="light" theme="danger" style="margin-left: 4px">待复核</t-tag>
+          </t-tooltip>
         </template>
         <template #noteCell="{ row }">
           <span class="muted">{{ row.adjust.reviewNote || '—' }}</span>

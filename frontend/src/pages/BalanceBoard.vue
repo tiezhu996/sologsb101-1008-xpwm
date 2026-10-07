@@ -80,6 +80,7 @@ function describe(row: ImbalanceRow): string {
     ratio: row.ratio,
     flowDeviation: row.flowDeviation,
     roomDeviation: row.roomDeviation,
+    roomTarget: row.roomTarget,
     imbalanceValue: row.imbalanceValue,
     level: row.level
   })
@@ -157,7 +158,7 @@ async function generateAll(): Promise<void> {
     .map((row) => ({
       valve: row.valve,
       measured: row.measured,
-      roomTempC: row.latest ? row.latest.roomTempC : 20,
+      roomTempC: row.latest ? row.latest.roomTempC : row.roomTarget,
       imbalanceValue: row.imbalanceValue,
       level: row.level,
       suggestOpening: row.suggestOpening,
@@ -181,6 +182,7 @@ function exportCsv(): void {
       ratio: row.ratio,
       flowDeviation: row.flowDeviation,
       roomDeviation: row.roomDeviation,
+      roomTarget: row.roomTarget,
       imbalanceValue: row.imbalanceValue,
       level: row.level
     }))
@@ -203,8 +205,8 @@ function goAdjust(): void {
       <div>
         <h2 class="page-head__title">失衡度计算与排序</h2>
         <p class="page-head__desc">
-          失衡度 = |流量偏差率| × 0.7 + |室温偏差| × 1.5；≤ {{ IMBALANCE_BALANCED }}% 记平衡，&gt;
-          {{ IMBALANCE_WARN }}% 记严重失衡。
+          失衡度 = |流量偏差率| × 0.7 + |室温偏差| × 1.5；室温基准按楼栋供热方式取值（地暖 20℃ / 散热器 18℃），
+          未登记方式按 20℃ 并提示；≤ {{ IMBALANCE_BALANCED }}% 记平衡，&gt; {{ IMBALANCE_WARN }}% 记严重失衡。
         </p>
       </div>
       <div class="page-head__actions">
@@ -266,6 +268,10 @@ function goAdjust(): void {
         <template #deviationCell="{ row }">
           <span v-if="row.latest">
             {{ row.flowDeviation.toFixed(1) }}% / {{ row.roomDeviation.toFixed(1) }}℃
+            <div v-if="row.roomTargetFallback" class="muted" style="color: #d68910">
+              基准 {{ row.roomTarget }}℃（楼栋未登记供热方式）
+            </div>
+            <div v-else class="muted">基准 {{ row.roomTarget }}℃</div>
           </span>
           <span v-else class="muted">—</span>
         </template>

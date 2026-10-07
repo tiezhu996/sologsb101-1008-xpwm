@@ -11,7 +11,7 @@ import type { Measure } from '@/types/measure'
 import type { Adjust } from '@/types/adjust'
 
 export const DB_NAME = 'gbheatgrid'
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 export const LS_KEYS = {
   dbVersion: 'gbheatgrid:db-version',
@@ -41,7 +41,7 @@ export interface Revisioned {
   revision?: number
 }
 
-export const ROW_REVISION = 2
+export const ROW_REVISION = 3
 
 export type StationRow = Station & Revisioned
 export type BuildingRow = Building & Revisioned
@@ -68,7 +68,7 @@ class HeatGridDatabase extends Dexie {
     })
 
     // v2：阀门补 stationId 冗余列并在升级时回填；实测补 revision；调节单补 reviewNote
-    this.version(DB_VERSION)
+    this.version(2)
       .stores({
         stations: 'id, name, commissionYear, updatedAt',
         buildings: 'id, stationId, name, heatMode, updatedAt',
@@ -84,7 +84,7 @@ class HeatGridDatabase extends Dexie {
           .table('valves')
           .toCollection()
           .modify((valve: Record<string, unknown>) => {
-            valve.revision = ROW_REVISION
+            valve.revision = 2
             if (typeof valve.stationId !== 'string' || valve.stationId.length === 0) {
               valve.stationId = stationOfBuilding.get(String(valve.buildingId)) ?? ''
             }
@@ -98,7 +98,7 @@ class HeatGridDatabase extends Dexie {
             .table(name)
             .toCollection()
             .modify((row: Record<string, unknown>) => {
-              row.revision = ROW_REVISION
+              row.revision = 2
             })
         }
 
@@ -112,6 +112,26 @@ class HeatGridDatabase extends Dexie {
             }
           })
       })
+
+    // v3：室温基准改为按楼栋供热方式取值（地暖 20℃ / 散热器 18℃）。
+    // 存量调节单是按全站 20℃ 口径生成的，保留原依据文本，统一补 needsReview 待复核标记。
+    this.version(DB_VERSION).upgrade(async (tx) => {
+      for (const name of ['stations', 'buildings', 'valves', 'measures', 'adjusts']) {
+        await tx
+          .table(name)
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            row.revision = ROW_REVISION
+          })
+      }
+
+      await tx
+        .table('adjusts')
+        .toCollection()
+        .modify((adjust: Record<string, unknown>) => {
+          if (typeof adjust.needsReview !== 'boolean') adjust.needsReview = true
+        })
+    })
   }
 }
 
@@ -202,10 +222,10 @@ const SEED_MEASURES: MeasureRow[] = [
 ]
 
 const SEED_ADJUSTS: AdjustRow[] = [
-  { id: 'aj-1', valveId: 'vv-1', targetOpening: 55, basis: '3号楼 BL-3-01 失衡度 30.2%，流量比 0.58 明显偏小，需增大开度补流', executor: '王海', state: '已复核', reviewNote: '复核后流量比回升至 0.96，室温 20.4℃，合格', createdAt: stamp(-14), updatedAt: stamp(-6), revision: ROW_REVISION },
-  { id: 'aj-2', valveId: 'vv-5', targetOpening: 60, basis: '7号楼 BL-7-01 失衡度 23.5%，楼栋整体偏小，建议开度由 40% 调至 60%', executor: '赵明', state: '已调节', reviewNote: '', createdAt: stamp(-9), updatedAt: stamp(-4), revision: ROW_REVISION },
-  { id: 'aj-3', valveId: 'vv-9', targetOpening: 62, basis: 'B座 BL-B-01 失衡度 20.2%，流量比 0.74 偏小', executor: '孙倩', state: '待下发', reviewNote: '', createdAt: stamp(-3), updatedAt: stamp(-3), revision: ROW_REVISION },
-  { id: 'aj-4', valveId: 'vv-4', targetOpening: 50, basis: '5号楼 BL-5-02 失衡度 20.0%，流量比 1.23 偏大，需关小阀门', executor: '李强', state: '待下发', reviewNote: '', createdAt: stamp(-2), updatedAt: stamp(-2), revision: ROW_REVISION }
+  { id: 'aj-1', valveId: 'vv-1', targetOpening: 55, basis: '3号楼 BL-3-01 失衡度 30.2%，流量比 0.58 明显偏小，需增大开度补流', executor: '王海', state: '已复核', reviewNote: '复核后流量比回升至 0.96，室温 20.4℃，合格', needsReview: true, createdAt: stamp(-14), updatedAt: stamp(-6), revision: ROW_REVISION },
+  { id: 'aj-2', valveId: 'vv-5', targetOpening: 60, basis: '7号楼 BL-7-01 失衡度 23.5%，楼栋整体偏小，建议开度由 40% 调至 60%', executor: '赵明', state: '已调节', reviewNote: '', needsReview: true, createdAt: stamp(-9), updatedAt: stamp(-4), revision: ROW_REVISION },
+  { id: 'aj-3', valveId: 'vv-9', targetOpening: 62, basis: 'B座 BL-B-01 失衡度 20.2%，流量比 0.74 偏小', executor: '孙倩', state: '待下发', reviewNote: '', needsReview: true, createdAt: stamp(-3), updatedAt: stamp(-3), revision: ROW_REVISION },
+  { id: 'aj-4', valveId: 'vv-4', targetOpening: 50, basis: '5号楼 BL-5-02 失衡度 20.0%，流量比 1.23 偏大，需关小阀门', executor: '李强', state: '待下发', reviewNote: '', needsReview: true, createdAt: stamp(-2), updatedAt: stamp(-2), revision: ROW_REVISION }
 ]
 
 export async function seedDatabase(): Promise<void> {
@@ -314,7 +334,13 @@ export async function importSnapshot(payload: BackupPayload): Promise<void> {
     await db.buildings.bulkPut((payload.buildings ?? []).map(rev))
     await db.valves.bulkPut((payload.valves ?? []).map(rev))
     await db.measures.bulkPut((payload.measures ?? []).map(rev))
-    await db.adjusts.bulkPut((payload.adjusts ?? []).map(rev))
+    // 旧版存档的调节单没有 needsReview 字段：其依据是旧口径（全站 20℃）生成的，补待复核标记
+    await db.adjusts.bulkPut(
+      (payload.adjusts ?? []).map((row) => ({
+        ...rev(row),
+        needsReview: row.needsReview === undefined ? true : row.needsReview
+      }))
+    )
   })
 }
 

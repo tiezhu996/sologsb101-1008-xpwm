@@ -13,7 +13,9 @@ import {
   type AdjustState
 } from '@/types/adjust'
 import { useValveStore } from '@/stores/valveStore'
+import { useStationStore } from '@/stores/stationStore'
 import { balanceLevel, imbalance, type BalanceLevel } from '@/utils/balance'
+import { roomTargetCOf } from '@/types/building'
 import type { Valve } from '@/types/valve'
 
 export interface AdjustEnriched {
@@ -27,6 +29,7 @@ export interface AdjustEnriched {
 export const useAdjustStore = defineStore('adjust', () => {
   const adjustTable = useIdbTable<AdjustRow>((database) => database.adjusts, { sortByUpdatedAt: false })
   const valveStore = useValveStore()
+  const stationStore = useStationStore()
 
   const stateFilter = ref<AdjustState[]>([])
   const keyword = ref('')
@@ -53,10 +56,12 @@ export const useAdjustStore = defineStore('adjust', () => {
     adjusts.value.map((adjust) => {
       const valve = valveStore.valves.find((item) => item.id === adjust.valveId) ?? null
       const snapshot = latestMeasureByValve.value[adjust.valveId]
+      const building = valve ? stationStore.buildingById.get(valve.buildingId) ?? null : null
+      const roomTarget = roomTargetCOf(building)
       const design = valve ? valve.designFlowM3h : 0
       const measured = snapshot ? snapshot.flowM3h : 0
-      const room = snapshot ? snapshot.roomTempC : 20
-      const value = snapshot ? imbalance(measured, design, room) : 0
+      const room = snapshot ? snapshot.roomTempC : roomTarget
+      const value = snapshot ? imbalance(measured, design, room, roomTarget) : 0
       return {
         adjust,
         valve,
@@ -90,6 +95,9 @@ export const useAdjustStore = defineStore('adjust', () => {
   const reviewedPercent = computed(() =>
     adjusts.value.length === 0 ? 0 : Math.round((stateCounts.value['已复核'] / adjusts.value.length) * 100)
   )
+
+  /** 室温基准口径调整前生成、尚未复核确认的调节单数 */
+  const pendingReviewCount = computed(() => adjusts.value.filter((adjust) => adjust.needsReview === true).length)
 
   function patchFilter(patch: { stateFilter?: AdjustState[]; keyword?: string }): void {
     if (patch.stateFilter) stateFilter.value = patch.stateFilter
@@ -143,9 +151,9 @@ export const useAdjustStore = defineStore('adjust', () => {
     return next
   }
 
-  /** 复核：写复核意见并闭环 */
+  /** 复核：写复核意见并闭环，同时清除口径待复核标记 */
   async function review(id: string, note: string): Promise<void> {
-    await adjustTable.update(id, { state: '已复核', reviewNote: note.trim() || '复核合格' })
+    await adjustTable.update(id, { state: '已复核', reviewNote: note.trim() || '复核合格', needsReview: false })
   }
 
   /** 由失衡度排行批量生成调节单 */
@@ -180,6 +188,7 @@ export const useAdjustStore = defineStore('adjust', () => {
     keyword,
     stateCounts,
     reviewedPercent,
+    pendingReviewCount,
     syncLatestMeasures,
     latestMeasureByValve,
     patchFilter,
