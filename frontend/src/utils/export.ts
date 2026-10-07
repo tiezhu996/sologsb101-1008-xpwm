@@ -6,7 +6,7 @@ import type { Building } from '@/types/building'
 import type { Valve } from '@/types/valve'
 import type { Measure } from '@/types/measure'
 import type { Adjust } from '@/types/adjust'
-import { imbalance, balanceLevel, flowRatio } from '@/utils/balance'
+import { imbalance, balanceLevel, flowRatio, roomTargetOf } from '@/utils/balance'
 
 export function download(filename: string, content: string, mime: string): void {
   const blob = new Blob([content], { type: mime })
@@ -37,7 +37,7 @@ export function csvCell(value: string | number): string {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
-/** 导出调节单 CSV（含失衡度与流量比） */
+/** 导出调节单 CSV（失衡度按楼栋室温基准同口径重算；既有单据保留原依据并标注待复核） */
 export function exportAdjustCsv(
   stations: Station[],
   buildings: Building[],
@@ -56,6 +56,7 @@ export function exportAdjustCsv(
     '实测流量(m³/h)',
     '流量比',
     '室温(℃)',
+    '室温基准(℃)',
     '失衡度(%)',
     '判级',
     '当前开度(%)',
@@ -63,6 +64,7 @@ export function exportAdjustCsv(
     '调节依据',
     '执行人',
     '状态',
+    '依据待复核',
     '复核意见'
   ]
   const lines: string[] = [header.map(csvCell).join(',')]
@@ -75,12 +77,13 @@ export function exportAdjustCsv(
     const design = valve ? valve.designFlowM3h : 0
     const measured = latest ? latest.flowM3h : 0
     const room = latest ? latest.roomTempC : 0
-    const value = imbalance(measured, design, room)
+    const roomTarget = roomTargetOf(building ? building.heatMode : '')
+    const value = latest ? imbalance(measured, design, room, roomTarget) : 0
     lines.push(
       [
         station ? station.name : '—',
         building ? building.name : '—',
-        building ? building.heatMode : '—',
+        building ? building.heatMode || '未登记' : '—',
         valve ? valve.code : '—',
         valve ? valve.dn : '—',
         valve ? valve.position : '—',
@@ -88,6 +91,7 @@ export function exportAdjustCsv(
         latest ? measured : '—',
         latest ? flowRatio(measured, design).toFixed(2) : '—',
         latest ? room : '—',
+        roomTarget,
         value,
         balanceLevel(value, measured, design),
         valve ? valve.currentOpening : '—',
@@ -95,6 +99,7 @@ export function exportAdjustCsv(
         adjust.basis,
         adjust.executor,
         adjust.state,
+        adjust.pendingRecheck ? '待复核' : '',
         adjust.reviewNote
       ]
         .map(csvCell)
@@ -116,11 +121,13 @@ export function exportBalanceCsv(
     ratio: number
     flowDeviation: number
     roomDeviation: number
+    /** 室温基准（℃），随楼栋供热方式取值 */
+    roomTarget: number
     imbalanceValue: number
     level: string
   }>
 ): string {
-  const header = ['换热站', '楼栋', '阀门编号', '设计流量', '实测流量', '流量比', '流量偏差(%)', '室温偏差(℃)', '失衡度(%)', '判级']
+  const header = ['换热站', '楼栋', '阀门编号', '设计流量', '实测流量', '流量比', '流量偏差(%)', '室温偏差(℃)', '室温基准(℃)', '失衡度(%)', '判级']
   const lines: string[] = [header.map(csvCell).join(',')]
   rows.forEach((row) => {
     lines.push(
@@ -133,6 +140,7 @@ export function exportBalanceCsv(
         row.ratio.toFixed(2),
         row.flowDeviation.toFixed(1),
         row.roomDeviation.toFixed(1),
+        row.roomTarget,
         row.imbalanceValue.toFixed(1),
         row.level
       ]

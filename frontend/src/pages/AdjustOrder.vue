@@ -44,12 +44,13 @@ const valveStore = useValveStore()
 const stationStore = useStationStore()
 const rank = useImbalanceRank()
 
-// 把最新实测快照灌入调节单 store，用于重算失衡度
+// 把最新实测快照（含楼栋室温基准）灌入调节单 store，用于重算失衡度
 watchEffect(() => {
   adjustStore.syncLatestMeasures(
     rank.rows.value.map((row) => ({
       valve: row.valve,
       measured: row.measured,
+      roomTarget: row.roomTarget,
       latest: row.latest ? { roomTempC: row.latest.roomTempC, date: row.latest.date } : null
     }))
   )
@@ -107,6 +108,8 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('调节单')
 const form = reactive<AdjustDraft>({ ...EMPTY_ADJUST_DRAFT })
 const formRef = ref()
+/** 正在编辑的单据是否带旧口径依据待复核标记（保存后清除） */
+const editingPendingRecheck = ref(false)
 let editingId: string | null = null
 
 const rules = {
@@ -123,6 +126,7 @@ const valveOptions = computed(() =>
 
 function openCreate(): void {
   editingId = null
+  editingPendingRecheck.value = false
   dialogTitle.value = '新建调节单'
   const first = rank.rows.value.find((row) => row.level !== '平衡')
   Object.assign(form, {
@@ -136,6 +140,7 @@ function openCreate(): void {
 
 function openEdit(row: AdjustEnriched): void {
   editingId = row.adjust.id
+  editingPendingRecheck.value = row.adjust.pendingRecheck === true
   dialogTitle.value = `编辑调节单 · ${row.valve ? row.valve.code : ''}`
   Object.assign(form, {
     valveId: row.adjust.valveId,
@@ -157,6 +162,7 @@ function describeRow(valveId: string): string {
     ratio: row.ratio,
     flowDeviation: row.flowDeviation,
     roomDeviation: row.roomDeviation,
+    roomTarget: row.roomTarget,
     imbalanceValue: row.imbalanceValue,
     level: row.level
   })
@@ -354,6 +360,7 @@ function clearData(): void {
       <StatBadge label="待下发" :value="adjustStore.stateCounts['待下发']" suffix="张" tone="warning" />
       <StatBadge label="已调节" :value="adjustStore.stateCounts['已调节']" suffix="张" tone="info" />
       <StatBadge label="已复核" :value="adjustStore.stateCounts['已复核']" suffix="张" tone="success" />
+      <StatBadge label="依据待复核" :value="adjustStore.pendingRecheckCount" suffix="张" tone="danger" />
       <StatBadge label="复核率" :value="adjustStore.reviewedPercent" :percent="adjustStore.reviewedPercent" suffix="%" tone="primary" />
     </div>
 
@@ -401,7 +408,12 @@ function clearData(): void {
           <strong>{{ formatOpening(row.adjust.targetOpening) }}</strong>
         </template>
         <template #basisCell="{ row }">
-          <span class="muted">{{ row.adjust.basis }}</span>
+          <div>
+            <t-tag v-if="row.adjust.pendingRecheck" size="small" theme="warning" variant="light">
+              依据待复核
+            </t-tag>
+            <span class="muted">{{ row.adjust.basis }}</span>
+          </div>
         </template>
         <template #stateCell="{ row }">
           <t-tag
@@ -488,6 +500,11 @@ function clearData(): void {
           <t-input v-model="form.reviewNote" placeholder="复核合格可留空" />
         </t-form-item>
       </t-form>
+      <t-alert
+        v-if="editingPendingRecheck"
+        theme="warning"
+        message="该单据依据为旧口径（全站 20℃）生成，保存后视为已按新口径（随楼栋供热方式取值）复核，并去除待复核标记。"
+      />
     </t-dialog>
 
     <t-dialog

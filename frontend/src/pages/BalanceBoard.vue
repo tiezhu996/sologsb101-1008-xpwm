@@ -17,6 +17,7 @@ import { useStationStore } from '@/stores/stationStore'
 import { useAdjustStore } from '@/stores/adjustStore'
 import { IMBALANCE_BALANCED, IMBALANCE_WARN, basisText, formatFlow, formatOpening } from '@/utils/balance'
 import { ADJUST_STATES, EMPTY_ADJUST_DRAFT, type AdjustDraft } from '@/types/adjust'
+import { ROOM_TARGET_C } from '@/types/measure'
 import { exportBalanceCsv } from '@/utils/export'
 import { HEAT_MODES, type HeatMode } from '@/types/building'
 
@@ -56,6 +57,9 @@ const rows = computed<ImbalanceRow[]>(() =>
   rank.filteredRows.value.filter((row) => (valveStore.filter.onlyImbalanced ? row.level !== '平衡' : true))
 )
 
+/** 未登记供热方式的阀门数：室温基准按 20℃ 计，需提示补登 */
+const missingHeatModeCount = computed(() => rank.rows.value.filter((row) => row.heatModeMissing).length)
+
 const columns = [
   { colKey: 'rank', title: '排名', width: 70, cell: 'rankCell' },
   { colKey: 'where', title: '换热站 / 楼栋', width: 200, cell: 'whereCell' },
@@ -80,6 +84,7 @@ function describe(row: ImbalanceRow): string {
     ratio: row.ratio,
     flowDeviation: row.flowDeviation,
     roomDeviation: row.roomDeviation,
+    roomTarget: row.roomTarget,
     imbalanceValue: row.imbalanceValue,
     level: row.level
   })
@@ -181,6 +186,7 @@ function exportCsv(): void {
       ratio: row.ratio,
       flowDeviation: row.flowDeviation,
       roomDeviation: row.roomDeviation,
+      roomTarget: row.roomTarget,
       imbalanceValue: row.imbalanceValue,
       level: row.level
     }))
@@ -204,7 +210,7 @@ function goAdjust(): void {
         <h2 class="page-head__title">失衡度计算与排序</h2>
         <p class="page-head__desc">
           失衡度 = |流量偏差率| × 0.7 + |室温偏差| × 1.5；≤ {{ IMBALANCE_BALANCED }}% 记平衡，&gt;
-          {{ IMBALANCE_WARN }}% 记严重失衡。
+          {{ IMBALANCE_WARN }}% 记严重失衡。室温基准随楼栋供热方式取值：地暖 20℃、散热器 18℃、未登记按 20℃。
         </p>
       </div>
       <div class="page-head__actions">
@@ -238,6 +244,13 @@ function goAdjust(): void {
       @update:switch-value="onOnlyImbalancedChange"
     />
 
+    <t-alert
+      v-if="missingHeatModeCount > 0"
+      theme="warning"
+      style="margin-top: 16px"
+      :message="`有 ${missingHeatModeCount} 只阀门所属楼栋未登记供热方式，室温基准暂按 ${ROOM_TARGET_C}℃ 计算，请到「换热站与楼栋台账」补登供热方式。`"
+    />
+
     <div class="panel" style="margin-top: 16px">
       <div class="panel-head">
         <h3 class="panel-title" style="margin: 0">失衡度排行（{{ rows.length }}）</h3>
@@ -266,6 +279,10 @@ function goAdjust(): void {
         <template #deviationCell="{ row }">
           <span v-if="row.latest">
             {{ row.flowDeviation.toFixed(1) }}% / {{ row.roomDeviation.toFixed(1) }}℃
+            <div class="muted">
+              基准 {{ row.roomTarget }}℃
+              <template v-if="row.heatModeMissing">（未登记）</template>
+            </div>
           </span>
           <span v-else class="muted">—</span>
         </template>

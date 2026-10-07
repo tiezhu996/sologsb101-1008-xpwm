@@ -18,6 +18,7 @@ import {
   flowRatio,
   imbalance,
   roomDeviationC,
+  roomTargetOf,
   round,
   suggestOpening,
   type BalanceLevel
@@ -35,6 +36,10 @@ export interface ImbalanceRow {
   /** 流量偏差率（%），正值为偏大 */
   flowDeviation: number
   roomDeviation: number
+  /** 室温基准（℃）：随楼栋供热方式取值，未登记按 20℃ */
+  roomTarget: number
+  /** 所属楼栋未登记供热方式（基准按 20℃ 计，需提示补登） */
+  heatModeMissing: boolean
   imbalanceValue: number
   level: BalanceLevel
   suggestOpening: number
@@ -79,11 +84,13 @@ export function useImbalanceRank(): UseImbalanceRankResult {
       const measured = latest ? latest.flowM3h : 0
       const room = latest ? latest.roomTempC : 20
       const design = valve.designFlowM3h
-      const ratio = flowRatio(measured, design)
-      const value = latest ? imbalance(measured, design, room) : 0
-      const level = latest ? balanceLevel(value, measured, design) : '平衡'
       const building = stationStore.buildings.find((item) => item.id === valve.buildingId) ?? null
       const station = stationStore.stations.find((item) => item.id === valve.stationId) ?? null
+      const roomTarget = roomTargetOf(building ? building.heatMode : '')
+      const heatModeMissing = building !== null && building.heatMode === ''
+      const ratio = flowRatio(measured, design)
+      const value = latest ? imbalance(measured, design, room, roomTarget) : 0
+      const level = latest ? balanceLevel(value, measured, design) : '平衡'
       return {
         valve,
         building,
@@ -93,7 +100,9 @@ export function useImbalanceRank(): UseImbalanceRankResult {
         measured,
         ratio,
         flowDeviation: latest ? flowDeviationPct(measured, design) : 0,
-        roomDeviation: latest ? roomDeviationC(room) : 0,
+        roomDeviation: latest ? roomDeviationC(room, roomTarget) : 0,
+        roomTarget,
+        heatModeMissing,
         imbalanceValue: value,
         level,
         suggestOpening: latest ? suggestOpening(valve.currentOpening, ratio, level) : valve.currentOpening

@@ -362,9 +362,10 @@ function goValves(stationId: string): void {
         >
           <template #areaCell="{ row }">{{ formatArea(row.areaM2) }}</template>
           <template #heatModeCell="{ row }">
-            <t-tag size="small" :theme="row.heatMode === '地暖' ? 'success' : 'warning'" variant="light">
+            <t-tag v-if="row.heatMode" size="small" :theme="row.heatMode === '地暖' ? 'success' : 'warning'" variant="light">
               {{ row.heatMode }}
             </t-tag>
+            <t-tag v-else size="small" theme="default" variant="light">未登记</t-tag>
           </template>
           <template #valveCountCell="{ row }">
             {{ valveStore.valves.filter((valve) => valve.buildingId === row.id).length }}
@@ -434,9 +435,10 @@ function goValves(stationId: string): void {
         <t-form-item label="单元数" name="units">
           <t-input-number v-model="buildingForm.units" :min="1" style="width: 100%" />
         </t-form-item>
-        <t-form-item label="供热方式" name="heatMode">
+        <t-form-item label="供热方式" name="heatMode" help="未登记时室温基准按 20℃ 计算，并在失衡榜提示补登">
           <t-radio-group v-model="buildingForm.heatMode" variant="default-filled">
             <t-radio-button v-for="item in HEAT_MODES" :key="item" :value="item">{{ item }}</t-radio-button>
+            <t-radio-button value="">未登记</t-radio-button>
           </t-radio-group>
         </t-form-item>
       </t-form>

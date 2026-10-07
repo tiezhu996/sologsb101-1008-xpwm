@@ -12,6 +12,11 @@ export interface Adjust {
   state: AdjustState
   /** 复核意见 */
   reviewNote: string
+  /**
+   * 依据待复核：室温基准口径调整前生成的单据保留原依据并置 true，
+   * 复核闭环或编辑保存后清除
+   */
+  pendingRecheck?: boolean
   createdAt: number
   updatedAt: number
 }

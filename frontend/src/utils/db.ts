@@ -11,7 +11,7 @@ import type { Measure } from '@/types/measure'
 import type { Adjust } from '@/types/adjust'
 
 export const DB_NAME = 'gbheatgrid'
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 export const LS_KEYS = {
   dbVersion: 'gbheatgrid:db-version',
@@ -41,7 +41,7 @@ export interface Revisioned {
   revision?: number
 }
 
-export const ROW_REVISION = 2
+export const ROW_REVISION = 3
 
 export type StationRow = Station & Revisioned
 export type BuildingRow = Building & Revisioned
@@ -112,6 +112,42 @@ class HeatGridDatabase extends Dexie {
             }
           })
       })
+
+    // v3：室温基准改为随楼栋供热方式取值（地暖 20℃、散热器 18℃、未登记 20℃）
+    // 1) 楼栋供热方式非 地暖/散热器 的一律置空（未登记，计算时按 20℃ 并提示补登）
+    // 2) 既有调节单依据为旧口径（全站 20℃）生成，保留原依据并标 pendingRecheck 待复核
+    this.version(DB_VERSION)
+      .stores({
+        stations: 'id, name, commissionYear, updatedAt',
+        buildings: 'id, stationId, name, heatMode, updatedAt',
+        valves: 'id, buildingId, stationId, code, position, updatedAt',
+        measures: 'id, valveId, date, operator, updatedAt',
+        adjusts: 'id, valveId, state, executor, updatedAt'
+      })
+      .upgrade(async (tx) => {
+        for (const name of ['stations', 'buildings', 'valves', 'measures', 'adjusts']) {
+          await tx
+            .table(name)
+            .toCollection()
+            .modify((row: Record<string, unknown>) => {
+              row.revision = ROW_REVISION
+            })
+        }
+
+        await tx
+          .table('buildings')
+          .toCollection()
+          .modify((building: Record<string, unknown>) => {
+            if (building.heatMode !== '地暖' && building.heatMode !== '散热器') building.heatMode = ''
+          })
+
+        await tx
+          .table('adjusts')
+          .toCollection()
+          .modify((adjust: Record<string, unknown>) => {
+            adjust.pendingRecheck = true
+          })
+      })
   }
 }
 
@@ -135,7 +171,8 @@ const SEED_STATIONS: StationRow[] = [
 const SEED_BUILDINGS: BuildingRow[] = [
   { id: 'bd-1', stationId: 'st-1', name: '3号楼', areaM2: 4800, floors: 11, units: 2, heatMode: '地暖', createdAt: stamp(-290), updatedAt: stamp(-2), revision: ROW_REVISION },
   { id: 'bd-2', stationId: 'st-1', name: '5号楼', areaM2: 5200, floors: 12, units: 2, heatMode: '散热器', createdAt: stamp(-289), updatedAt: stamp(-2), revision: ROW_REVISION },
-  { id: 'bd-3', stationId: 'st-1', name: '7号楼', areaM2: 4100, floors: 9, units: 1, heatMode: '地暖', createdAt: stamp(-288), updatedAt: stamp(-3), revision: ROW_REVISION },
+  // 7号楼模拟历史遗留：未登记供热方式，室温基准按 20℃ 计并在失衡榜提示补登
+  { id: 'bd-3', stationId: 'st-1', name: '7号楼', areaM2: 4100, floors: 9, units: 1, heatMode: '', createdAt: stamp(-288), updatedAt: stamp(-3), revision: ROW_REVISION },
   { id: 'bd-4', stationId: 'st-2', name: 'A座', areaM2: 6800, floors: 15, units: 3, heatMode: '散热器', createdAt: stamp(-270), updatedAt: stamp(-1), revision: ROW_REVISION },
   { id: 'bd-5', stationId: 'st-2', name: 'B座', areaM2: 5900, floors: 14, units: 2, heatMode: '地暖', createdAt: stamp(-269), updatedAt: stamp(-1), revision: ROW_REVISION }
 ]
@@ -183,29 +220,32 @@ const SEED_MEASURES: MeasureRow[] = [
   mkMeasure('ms-1-2', 'vv-1', -2, 18.6, 51, 39.5, 19.4, '王海'),
   mkMeasure('ms-2-1', 'vv-2', -16, 11.9, 53, 41, 20.3, '王海'),
   mkMeasure('ms-2-2', 'vv-2', -2, 12.4, 51, 39.5, 20.6, '王海'),
-  mkMeasure('ms-3-1', 'vv-3', -15, 36.2, 52, 40, 20.4, '李强'),
-  mkMeasure('ms-3-2', 'vv-3', -1, 38.8, 50, 39, 21.2, '李强'),
-  mkMeasure('ms-4-1', 'vv-4', -15, 23.1, 52, 40, 22.1, '李强'),
-  mkMeasure('ms-4-2', 'vv-4', -1, 24.6, 50, 39, 22.6, '李强'),
+  // 5号楼为散热器楼栋，室温基准 18℃，正常户室温在 18~19℃ 区间
+  mkMeasure('ms-3-1', 'vv-3', -15, 36.2, 52, 40, 18.5, '李强'),
+  mkMeasure('ms-3-2', 'vv-3', -1, 38.8, 50, 39, 18.9, '李强'),
+  mkMeasure('ms-4-1', 'vv-4', -15, 23.1, 52, 40, 19.1, '李强'),
+  mkMeasure('ms-4-2', 'vv-4', -1, 24.6, 50, 39, 19.4, '李强'),
   mkMeasure('ms-5-1', 'vv-5', -15, 14.4, 52, 40, 18.8, '赵明'),
   mkMeasure('ms-5-2', 'vv-5', -1, 15.1, 50, 38.5, 19.0, '赵明'),
   mkMeasure('ms-6-1', 'vv-6', -14, 13.4, 52, 40, 19.9, '赵明'),
   mkMeasure('ms-6-2', 'vv-6', -1, 13.9, 50, 38.5, 20.1, '赵明'),
-  mkMeasure('ms-7-1', 'vv-7', -13, 54.2, 51, 39, 21.1, '孙倩'),
-  mkMeasure('ms-7-2', 'vv-7', -1, 56.4, 49, 38, 21.8, '孙倩'),
-  mkMeasure('ms-8-1', 'vv-8', -13, 17.6, 51, 39, 19.2, '孙倩'),
-  mkMeasure('ms-8-2', 'vv-8', -1, 18.2, 49, 38, 19.5, '孙倩'),
+  // A座为散热器楼栋，室温基准 18℃
+  mkMeasure('ms-7-1', 'vv-7', -13, 54.2, 51, 39, 18.8, '孙倩'),
+  mkMeasure('ms-7-2', 'vv-7', -1, 56.4, 49, 38, 19.2, '孙倩'),
+  mkMeasure('ms-8-1', 'vv-8', -13, 17.6, 51, 39, 18.2, '孙倩'),
+  mkMeasure('ms-8-2', 'vv-8', -1, 18.2, 49, 38, 18.4, '孙倩'),
   mkMeasure('ms-9-1', 'vv-9', -12, 21.4, 50, 38, 18.6, '孙倩'),
   mkMeasure('ms-9-2', 'vv-9', -1, 22.1, 49, 37.5, 18.8, '孙倩'),
   mkMeasure('ms-10-1', 'vv-10', -12, 21.8, 50, 38, 23.0, '王海'),
   mkMeasure('ms-10-2', 'vv-10', -1, 22.6, 49, 37.5, 23.4, '王海')
 ]
 
+// 种子调节单依据为旧口径（全站 20℃）文案，保留原文并标 pendingRecheck 待复核
 const SEED_ADJUSTS: AdjustRow[] = [
-  { id: 'aj-1', valveId: 'vv-1', targetOpening: 55, basis: '3号楼 BL-3-01 失衡度 30.2%，流量比 0.58 明显偏小，需增大开度补流', executor: '王海', state: '已复核', reviewNote: '复核后流量比回升至 0.96，室温 20.4℃，合格', createdAt: stamp(-14), updatedAt: stamp(-6), revision: ROW_REVISION },
-  { id: 'aj-2', valveId: 'vv-5', targetOpening: 60, basis: '7号楼 BL-7-01 失衡度 23.5%，楼栋整体偏小，建议开度由 40% 调至 60%', executor: '赵明', state: '已调节', reviewNote: '', createdAt: stamp(-9), updatedAt: stamp(-4), revision: ROW_REVISION },
-  { id: 'aj-3', valveId: 'vv-9', targetOpening: 62, basis: 'B座 BL-B-01 失衡度 20.2%，流量比 0.74 偏小', executor: '孙倩', state: '待下发', reviewNote: '', createdAt: stamp(-3), updatedAt: stamp(-3), revision: ROW_REVISION },
-  { id: 'aj-4', valveId: 'vv-4', targetOpening: 50, basis: '5号楼 BL-5-02 失衡度 20.0%，流量比 1.23 偏大，需关小阀门', executor: '李强', state: '待下发', reviewNote: '', createdAt: stamp(-2), updatedAt: stamp(-2), revision: ROW_REVISION }
+  { id: 'aj-1', valveId: 'vv-1', targetOpening: 55, basis: '3号楼 BL-3-01 失衡度 30.2%，流量比 0.58 明显偏小，需增大开度补流', executor: '王海', state: '已复核', reviewNote: '复核后流量比回升至 0.96，室温 20.4℃，合格', pendingRecheck: true, createdAt: stamp(-14), updatedAt: stamp(-6), revision: ROW_REVISION },
+  { id: 'aj-2', valveId: 'vv-5', targetOpening: 60, basis: '7号楼 BL-7-01 失衡度 23.5%，楼栋整体偏小，建议开度由 40% 调至 60%', executor: '赵明', state: '已调节', reviewNote: '', pendingRecheck: true, createdAt: stamp(-9), updatedAt: stamp(-4), revision: ROW_REVISION },
+  { id: 'aj-3', valveId: 'vv-9', targetOpening: 62, basis: 'B座 BL-B-01 失衡度 20.2%，流量比 0.74 偏小', executor: '孙倩', state: '待下发', reviewNote: '', pendingRecheck: true, createdAt: stamp(-3), updatedAt: stamp(-3), revision: ROW_REVISION },
+  { id: 'aj-4', valveId: 'vv-4', targetOpening: 50, basis: '5号楼 BL-5-02 失衡度 20.0%，流量比 1.23 偏大，需关小阀门', executor: '李强', state: '待下发', reviewNote: '', pendingRecheck: true, createdAt: stamp(-2), updatedAt: stamp(-2), revision: ROW_REVISION }
 ]
 
 export async function seedDatabase(): Promise<void> {

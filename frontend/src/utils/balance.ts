@@ -1,8 +1,9 @@
 /**
  * 水力失衡度计算、开度调整步长建议与单位格式化
  * 失衡度 = |流量偏差率| × 0.7 + |室温偏差| × 1.5（单位：%）
+ * 室温基准随楼栋供热方式取值：地暖 20℃、散热器 18℃、未登记按 20℃
  */
-import type { Building } from '@/types/building'
+import type { Building, HeatMode } from '@/types/building'
 import type { Valve } from '@/types/valve'
 import type { Measure } from '@/types/measure'
 import { ROOM_TARGET_C } from '@/types/measure'
@@ -49,6 +50,14 @@ export function round(value: number, digits = 2): number {
   return Math.round(value * factor) / factor
 }
 
+/** 散热器楼栋室温基准（℃）；地暖与未登记均按 ROOM_TARGET_C（20℃） */
+export const ROOM_TARGET_RADIATOR_C = 18
+
+/** 室温基准随楼栋供热方式取值：地暖 20℃、散热器 18℃、未登记按 20℃ */
+export function roomTargetOf(heatMode: HeatMode | '' | null | undefined): number {
+  return heatMode === '散热器' ? ROOM_TARGET_RADIATOR_C : ROOM_TARGET_C
+}
+
 /** 流量比 = 实测流量 ÷ 设计流量 */
 export function flowRatio(measured: number, design: number): number {
   if (!Number.isFinite(design) || design <= 0) return 0
@@ -61,15 +70,15 @@ export function flowDeviationPct(measured: number, design: number): number {
   return round((measured / design - 1) * 100, 2)
 }
 
-/** 室温偏差（℃） */
-export function roomDeviationC(roomTempC: number): number {
-  return round(roomTempC - ROOM_TARGET_C, 2)
+/** 室温偏差（℃），基准默认 20℃，应传入楼栋供热方式对应的基准 */
+export function roomDeviationC(roomTempC: number, targetC: number = ROOM_TARGET_C): number {
+  return round(roomTempC - targetC, 2)
 }
 
 /** 合成失衡度（%）：流量偏差占七成权重，室温偏差占三成权重 */
-export function imbalance(measured: number, design: number, roomTempC: number): number {
+export function imbalance(measured: number, design: number, roomTempC: number, targetC: number = ROOM_TARGET_C): number {
   const flowPart = Math.abs(flowDeviationPct(measured, design)) * 0.7
-  const roomPart = Math.abs(roomDeviationC(roomTempC)) * 1.5
+  const roomPart = Math.abs(roomDeviationC(roomTempC, targetC)) * 1.5
   return round(flowPart + roomPart, 1)
 }
 
@@ -104,11 +113,13 @@ export function basisText(row: {
   ratio: number
   flowDeviation: number
   roomDeviation: number
+  /** 室温基准（℃），随楼栋供热方式取值 */
+  roomTarget: number
   imbalanceValue: number
   level: BalanceLevel
 }): string {
   const buildingName = row.building ? row.building.name : '未知楼栋'
-  return `${buildingName} ${row.valve.code} 流量比 ${row.ratio.toFixed(2)}（偏差 ${row.flowDeviation.toFixed(1)}%）、室温偏差 ${row.roomDeviation.toFixed(1)}℃，合成失衡度 ${row.imbalanceValue.toFixed(1)}%，判定为「${row.level}」`
+  return `${buildingName} ${row.valve.code} 流量比 ${row.ratio.toFixed(2)}（偏差 ${row.flowDeviation.toFixed(1)}%）、室温偏差 ${row.roomDeviation.toFixed(1)}℃（基准 ${row.roomTarget}℃），合成失衡度 ${row.imbalanceValue.toFixed(1)}%，判定为「${row.level}」`
 }
 
 export function formatFlow(flowM3h: number): string {
@@ -132,7 +143,11 @@ export function formatImbalance(value: number): string {
 }
 
 /** 采集一组实测时的室温偏差提示 */
-export function measureHint(measure: Pick<Measure, 'flowM3h' | 'roomTempC'>, designFlowM3h: number): string {
-  const value = imbalance(measure.flowM3h, designFlowM3h, measure.roomTempC)
+export function measureHint(
+  measure: Pick<Measure, 'flowM3h' | 'roomTempC'>,
+  designFlowM3h: number,
+  targetC: number = ROOM_TARGET_C
+): string {
+  const value = imbalance(measure.flowM3h, designFlowM3h, measure.roomTempC, targetC)
   return `失衡度约 ${value.toFixed(1)}%`
 }

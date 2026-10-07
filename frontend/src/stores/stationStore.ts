@@ -46,7 +46,10 @@ export const useStationStore = defineStore('station', () => {
   /** 楼栋筛选：供热方式 + 建筑面积区间 + 关键字 */
   const filteredBuildings = computed(() =>
     buildingsOfStation.value.filter((building) => {
-      if (heatModes.value.length > 0 && !heatModes.value.includes(building.heatMode)) return false
+      if (heatModes.value.length > 0) {
+        const mode = building.heatMode
+        if (mode === '' || !heatModes.value.includes(mode)) return false
+      }
       if (areaFrom.value !== null && building.areaM2 < areaFrom.value) return false
       if (areaTo.value !== null && building.areaM2 > areaTo.value) return false
       const text = keyword.value.trim().toLowerCase()

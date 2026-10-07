@@ -34,7 +34,10 @@ export const EMPTY_MEASURE_DRAFT: MeasureDraft = {
   operator: ''
 }
 
-/** 室温设计目标值（℃），用于计算室温偏差 */
+/**
+ * 默认室温基准（℃）：楼栋未登记供热方式时按此值计算室温偏差；
+ * 已登记楼栋按供热方式取值（见 utils/balance.ts 的 roomTargetOf）
+ */
 export const ROOM_TARGET_C = 20
 
 export interface MeasureBatchRow {

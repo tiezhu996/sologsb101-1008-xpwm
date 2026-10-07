@@ -16,7 +16,7 @@ import { useStationStore } from '@/stores/stationStore'
 import { useImbalanceRank } from '@/hooks/useImbalanceRank'
 import { EMPTY_MEASURE_DRAFT, type Measure, type MeasureDraft } from '@/types/measure'
 import type { MeasureRow } from '@/utils/db'
-import { balanceLevel, formatFlow, formatTemp, imbalance } from '@/utils/balance'
+import { balanceLevel, formatFlow, formatTemp, imbalance, roomTargetOf } from '@/utils/balance'
 import { parseMeasureBatch } from '@/utils/export'
 
 type FilterModel = { keyword: string; [key: string]: string | string[] | boolean }
@@ -68,6 +68,13 @@ const candidates = computed(() => valveStore.filtered)
 const activeValve = computed(() => valveStore.valves.find((valve) => valve.id === activeValveId.value) ?? null)
 const activeRow = computed(() => (activeValveId.value ? rank.rowOf(activeValveId.value) : null))
 
+const activeBuilding = computed(() =>
+  activeValve.value ? stationStore.buildingById.get(activeValve.value.buildingId) ?? null : null
+)
+
+/** 室温基准随楼栋供热方式取值，未登记按 20℃ */
+const activeRoomTarget = computed(() => roomTargetOf(activeBuilding.value ? activeBuilding.value.heatMode : ''))
+
 const measuresOfActive = computed(() =>
   measureTable.rows.value
     .filter((measure) => measure.valveId === activeValveId.value)
@@ -80,7 +87,7 @@ const latestMeasures = computed(() =>
 
 const previewImbalance = computed(() => {
   const design = activeValve.value ? activeValve.value.designFlowM3h : 0
-  const value = imbalance(form.flowM3h, design, form.roomTempC)
+  const value = imbalance(form.flowM3h, design, form.roomTempC, activeRoomTarget.value)
   return { value, level: balanceLevel(value, form.flowM3h, design) }
 })
 
@@ -103,7 +110,7 @@ function openCreate(): void {
     flowM3h: activeRow.value?.measured || activeValve.value.designFlowM3h,
     supplyTempC: 50,
     returnTempC: 40,
-    roomTempC: 20,
+    roomTempC: activeRoomTarget.value,
     operator: ''
   })
   detailDialogVisible.value = true
@@ -162,7 +169,8 @@ const batchPreview = computed(() => {
   return parsed.map((row) => {
     const valve = valveStore.valves.find((item) => item.code === row.code) ?? null
     const design = valve ? valve.designFlowM3h : 0
-    const value = valve ? imbalance(row.flowM3h, design, row.roomTempC) : 0
+    const building = valve ? stationStore.buildingById.get(valve.buildingId) ?? null : null
+    const value = valve ? imbalance(row.flowM3h, design, row.roomTempC, roomTargetOf(building ? building.heatMode : '')) : 0
     return { ...row, valve, imbalanceValue: value }
   })
 })
@@ -366,7 +374,10 @@ async function importBatch(): Promise<void> {
           <t-input v-model="form.operator" placeholder="如 王海" />
         </t-form-item>
       </t-form>
-      <t-alert theme="info" :message="`当前输入失衡度约 ${previewImbalance.value.toFixed(1)}% · 判定 ${previewImbalance.level}`" />
+      <t-alert
+        theme="info"
+        :message="`当前输入失衡度约 ${previewImbalance.value.toFixed(1)}% · 判定 ${previewImbalance.level} · 室温基准 ${activeRoomTarget}℃（随楼栋供热方式取值）`"
+      />
     </t-dialog>
 
     <t-dialog
@@ -378,7 +389,7 @@ async function importBatch(): Promise<void> {
       @confirm="importBatch"
     >
       <p class="muted" style="margin-top: 0">
-        每行一条：阀门编号,日期(YYYY-MM-DD),流量,供温,回温,室温,录入人
+        每行一条：阀门编号,日期(YYYY-MM-DD),流量,供温,回温,室温,录入人；预览失衡度按阀门所属楼栋供热方式取室温基准（地暖 20℃ / 散热器 18℃ / 未登记 20℃）
       </p>
       <t-textarea v-model="batchText" :autosize="{ minRows: 6, maxRows: 12 }" placeholder="BL-3-01,2024-11-25,20.5,50,39,20.4,王海" />
       <div v-if="batchPreview.length > 0" style="margin-top: 12px">

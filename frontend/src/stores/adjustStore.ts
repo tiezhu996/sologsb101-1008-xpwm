@@ -30,16 +30,21 @@ export const useAdjustStore = defineStore('adjust', () => {
 
   const stateFilter = ref<AdjustState[]>([])
   const keyword = ref('')
-  const latestMeasureByValve = ref<Record<string, { flowM3h: number; roomTempC: number; date: string }>>({})
+  const latestMeasureByValve = ref<Record<string, { flowM3h: number; roomTempC: number; date: string; roomTargetC: number }>>({})
 
-  /** 由失衡度排行灌入最新实测快照，供失衡度重算与展示 */
+  /** 由失衡度排行灌入最新实测快照（含楼栋室温基准），供失衡度重算与展示 */
   function syncLatestMeasures(
-    rows: Array<{ valve: Valve; measured: number; latest: { roomTempC: number; date: string } | null }>
+    rows: Array<{ valve: Valve; measured: number; roomTarget: number; latest: { roomTempC: number; date: string } | null }>
   ): void {
-    const map: Record<string, { flowM3h: number; roomTempC: number; date: string }> = {}
+    const map: Record<string, { flowM3h: number; roomTempC: number; date: string; roomTargetC: number }> = {}
     rows.forEach((row) => {
       if (row.latest) {
-        map[row.valve.id] = { flowM3h: row.measured, roomTempC: row.latest.roomTempC, date: row.latest.date }
+        map[row.valve.id] = {
+          flowM3h: row.measured,
+          roomTempC: row.latest.roomTempC,
+          date: row.latest.date,
+          roomTargetC: row.roomTarget
+        }
       }
     })
     latestMeasureByValve.value = map
@@ -56,7 +61,7 @@ export const useAdjustStore = defineStore('adjust', () => {
       const design = valve ? valve.designFlowM3h : 0
       const measured = snapshot ? snapshot.flowM3h : 0
       const room = snapshot ? snapshot.roomTempC : 20
-      const value = snapshot ? imbalance(measured, design, room) : 0
+      const value = snapshot ? imbalance(measured, design, room, snapshot.roomTargetC) : 0
       return {
         adjust,
         valve,
@@ -91,6 +96,9 @@ export const useAdjustStore = defineStore('adjust', () => {
     adjusts.value.length === 0 ? 0 : Math.round((stateCounts.value['已复核'] / adjusts.value.length) * 100)
   )
 
+  /** 依据仍为旧口径（全站 20℃）、等待按新基准复核的单据数 */
+  const pendingRecheckCount = computed(() => adjusts.value.filter((adjust) => adjust.pendingRecheck === true).length)
+
   function patchFilter(patch: { stateFilter?: AdjustState[]; keyword?: string }): void {
     if (patch.stateFilter) stateFilter.value = patch.stateFilter
     if (patch.keyword !== undefined) keyword.value = patch.keyword
@@ -117,8 +125,9 @@ export const useAdjustStore = defineStore('adjust', () => {
     )) as AdjustRow
   }
 
+  /** 编辑保存视为已按新口径核对依据，清除待复核标记 */
   async function updateAdjust(id: string, patch: Partial<AdjustDraft>): Promise<void> {
-    const next: Partial<AdjustRow> = { ...patch }
+    const next: Partial<AdjustRow> = { ...patch, pendingRecheck: false }
     if (patch.targetOpening !== undefined) next.targetOpening = Math.min(100, Math.max(0, Math.round(patch.targetOpening)))
     if (patch.basis !== undefined) next.basis = patch.basis.trim()
     if (patch.executor !== undefined) next.executor = patch.executor.trim()
@@ -143,9 +152,9 @@ export const useAdjustStore = defineStore('adjust', () => {
     return next
   }
 
-  /** 复核：写复核意见并闭环 */
+  /** 复核：写复核意见并闭环，同时清除依据待复核标记 */
   async function review(id: string, note: string): Promise<void> {
-    await adjustTable.update(id, { state: '已复核', reviewNote: note.trim() || '复核合格' })
+    await adjustTable.update(id, { state: '已复核', reviewNote: note.trim() || '复核合格', pendingRecheck: false })
   }
 
   /** 由失衡度排行批量生成调节单 */
@@ -164,6 +173,7 @@ export const useAdjustStore = defineStore('adjust', () => {
         executor: '待指派',
         state: '待下发' as AdjustState,
         reviewNote: '',
+        pendingRecheck: false,
         createdAt: now,
         updatedAt: now
       }))
@@ -180,6 +190,7 @@ export const useAdjustStore = defineStore('adjust', () => {
     keyword,
     stateCounts,
     reviewedPercent,
+    pendingRecheckCount,
     syncLatestMeasures,
     latestMeasureByValve,
     patchFilter,

@@ -105,7 +105,7 @@ const buildingOptions = computed(() =>
     .map((building) => {
       const station = stationStore.stationById.get(building.stationId)
       return {
-        label: `${station ? station.name : '未知站'} · ${building.name}（${building.heatMode}）`,
+        label: `${station ? station.name : '未知站'} · ${building.name}（${building.heatMode || '未登记'}）`,
         value: building.id
       }
     })

@@ -10,7 +10,8 @@ export interface Building {
   floors: number
   /** 单元数 */
   units: number
-  heatMode: HeatMode
+  /** 供热方式；空串表示未登记（室温基准按 20℃ 计并提示补登） */
+  heatMode: HeatMode | ''
   createdAt: number
   updatedAt: number
 }
@@ -23,7 +24,7 @@ export interface BuildingDraft {
   areaM2: number
   floors: number
   units: number
-  heatMode: HeatMode
+  heatMode: HeatMode | ''
 }
 
 export const EMPTY_BUILDING_DRAFT: BuildingDraft = {
@@ -32,5 +33,5 @@ export const EMPTY_BUILDING_DRAFT: BuildingDraft = {
   areaM2: 0,
   floors: 0,
   units: 0,
-  heatMode: '地暖'
+  heatMode: ''
 }
